@@ -1,0 +1,163 @@
+[
+  {
+    "id": "TC1",
+    "ac": "AC1",
+    "type": "auto",
+    "source": "design",
+    "text": "Given the service is running, When the gateway calls tools/list, Then exactly the 9 canva_* tools from Tech design §4 are returned, each description ≤500 chars with a ≤100-char first line.",
+    "tests": ["tests/test_tools.py::test_tools_list_matches_the_nine_tool_contract"]
+  },
+  {
+    "id": "TC2",
+    "ac": "AC2",
+    "type": "auto",
+    "source": "design",
+    "text": "Given no X-Canva-Access-Token header is sent, When any Canva tool is called, Then the service returns HTTP 401 with a body naming the missing header, not HTTP 500.",
+    "tests": ["tests/test_middleware.py::test_missing_header_returns_401_listing_required_header"]
+  },
+  {
+    "id": "TC3",
+    "ac": "AC3",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token for an account with existing designs, When canva_list_designs is called with no arguments, Then it returns up to 20 designs (id/title/thumbnail_url/edit_url/view_url/updated_at) plus a continuation token if more exist.",
+    "steps": [
+      "Obtain a real Canva Connect access token for a test account that has at least 25 designs (create extra blank designs first if needed, to exercise pagination)",
+      "Call canva_list_designs with no arguments against the deployed service",
+      "Inspect the returned JSON"
+    ],
+    "expect": "Response contains <=20 designs, each with id/title/thumbnail_url/edit_url/view_url/updated_at populated, and a non-null continuation token (since the account has more than 20 designs)",
+    "result": "untested",
+    "notes": "needs a real vendor account"
+  },
+  {
+    "id": "TC4",
+    "ac": "AC4",
+    "type": "auto",
+    "source": "design",
+    "text": "Given Canva returns an empty designs array for a query, When canva_list_designs is called with that query, Then the tool returns an empty list, not an error and not a not_found code.",
+    "tests": ["tests/test_tools.py::test_list_designs_returns_empty_list_when_canva_has_no_matches"]
+  },
+  {
+    "id": "TC5",
+    "ac": "AC5",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token and a design id that exists and is visible to that account, When canva_get_design is called, Then it returns id/title/page_count/thumbnail_url/edit_url/view_url.",
+    "steps": [
+      "Using the same test account as TC3, pick one known design id",
+      "Call canva_get_design(design_id=<that id>)"
+    ],
+    "expect": "Response has id, title, page_count >= 1, thumbnail_url, edit_url, view_url, all non-empty",
+    "result": "untested",
+    "notes": "needs a real vendor account"
+  },
+  {
+    "id": "TC6",
+    "ac": "AC6",
+    "type": "auto",
+    "source": "design",
+    "text": "Given Canva returns 404 for a design id, When canva_get_design is called with that id, Then the tool returns a structured not_found error, not a raw passthrough of Canva's 4xx body.",
+    "tests": ["tests/test_tools.py::test_get_design_maps_canva_404_to_structured_not_found"]
+  },
+  {
+    "id": "TC7",
+    "ac": "AC7",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token, When canva_create_design is called with a supported design type and a title, Then a new empty design is created in the account and its id + edit_url are returned.",
+    "steps": [
+      "Call canva_create_design(design_type=<a supported preset, e.g. the Instagram Post preset from the design-types endpoint>, title=\"PRD-21299 smoke test\")",
+      "Open the returned edit_url in a browser signed in as the same test account",
+      "Call canva_list_designs(query=\"PRD-21299 smoke test\") to confirm it is discoverable"
+    ],
+    "expect": "Tool returns a new id + edit_url; the edit_url opens a blank design with the given title; the design shows up in canva_list_designs",
+    "result": "untested",
+    "notes": "needs a real vendor account; writes a real design to the test account, clean up afterward"
+  },
+  {
+    "id": "TC8",
+    "ac": "AC8",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token and an existing visible design id, When canva_export_design is called with format=pdf, Then within the internal poll budget it returns download URL(s), or an export_id with status in_progress if the budget runs out — it never hangs past the budget.",
+    "steps": [
+      "Call canva_export_design(design_id=<a single-page test design>, format=\"pdf\")",
+      "Measure wall-clock time to response",
+      "If status is in_progress, note the export_id for TC9"
+    ],
+    "expect": "Response arrives within the documented poll budget (<120s); on success it contains one or more download URLs that resolve to a PDF; on budget exhaustion it returns an export_id and status in_progress, never an unhandled timeout or crash",
+    "result": "untested",
+    "notes": "needs a real vendor account"
+  },
+  {
+    "id": "TC9",
+    "ac": "AC9",
+    "type": "manual",
+    "source": "design",
+    "text": "Given an export_id from TC8 that had not finished, When canva_get_export_status is called, Then it returns in_progress and then eventually success with download URL(s) once Canva finishes the job.",
+    "steps": [
+      "Call canva_get_export_status(export_id=<id from TC8>) immediately",
+      "Repeat every few seconds until status is success or failed"
+    ],
+    "expect": "Status transitions from in_progress to success; once success, the response includes the same shape of download URL(s) as a synchronous export would",
+    "result": "untested",
+    "notes": "needs a real vendor account; only exercised if TC8 did not finish inside its own budget"
+  },
+  {
+    "id": "TC10",
+    "ac": "AC10",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token and a publicly reachable URL to an image, When canva_upload_asset_from_url is called, Then the asset is uploaded to the account's Uploads folder and its asset id is returned.",
+    "steps": [
+      "Call canva_upload_asset_from_url(url=<a publicly reachable PNG/JPEG test image URL>, name=\"PRD-21299 smoke asset\")",
+      "Call canva_get_asset(asset_id=<returned id>)",
+      "Call canva_list_folder_items(folder_id=\"uploads\")"
+    ],
+    "expect": "canva_get_asset returns the same name and a thumbnail_url; the asset appears in the uploads folder listing",
+    "result": "untested",
+    "notes": "needs a real vendor account; writes a real asset, clean up afterward"
+  },
+  {
+    "id": "TC11",
+    "ac": "AC11",
+    "type": "manual",
+    "source": "design",
+    "text": "Given a valid access token, When canva_list_folder_items is called with folder_id omitted (defaults to root), Then it returns the account's top-level designs/folders, paginated the same way as canva_list_designs.",
+    "steps": [
+      "Call canva_list_folder_items() with no arguments",
+      "Cross-check a known design/folder from the test account appears in the result"
+    ],
+    "expect": "Response contains an items array including the known design/folder, each item with id/type/title-or-name/thumbnail_url, plus a continuation token if the account has more top-level items than the default limit",
+    "result": "untested",
+    "notes": "needs a real vendor account"
+  },
+  {
+    "id": "TC12",
+    "ac": "AC12",
+    "type": "auto",
+    "source": "design",
+    "text": "Given two concurrent requests carrying two different tokens, When each calls a Canva tool, Then each outbound call to Canva uses only its own request's token and neither request's context leaks into the other.",
+    "tests": ["tests/test_middleware.py::test_contextvar_token_is_isolated_across_concurrent_requests"]
+  },
+  {
+    "id": "TC13",
+    "ac": "AC13",
+    "type": "auto",
+    "source": "design",
+    "text": "Given a mocked Canva transport that returns 429 then 200, When a tool calls it, Then the service retries with backoff and returns the successful result; given a transport that always returns 5xx past the single-call budget, Then it returns a structured upstream_error with retryable true, not a hang or crash.",
+    "tests": [
+      "tests/test_tools.py::test_retries_on_429_then_succeeds",
+      "tests/test_tools.py::test_returns_structured_upstream_error_when_5xx_exhausts_budget"
+    ]
+  },
+  {
+    "id": "TC14",
+    "ac": "AC14",
+    "type": "auto",
+    "source": "design",
+    "text": "Given a mocked Canva transport that returns 401 (expired/revoked token), When any tool is called, Then the service returns its own 401/unauthorized immediately, without treating it as a transient/retryable error.",
+    "tests": ["tests/test_tools.py::test_canva_401_is_surfaced_as_unauthorized_without_retry"]
+  }
+]
