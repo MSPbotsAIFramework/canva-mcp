@@ -1,0 +1,40 @@
+# PRD-21299 · Code review
+
+## Round 1 · 2026-11-04 · reviewed dev/PRD-21299 @ 6d66df3 (base main @ e828ad9)
+
+Verdict: changes requested
+
+### Findings
+
+1. [must-fix] `src/canva_mcp/tools/designs.py:66-77` and `src/canva_mcp/tools/folders.py:57-72` — pagination/continuation mismatch causes silent data loss.
+
+   `canva_list_designs` calls Canva's `GET /designs` (line 66-69) without forwarding any page-size parameter, then truncates the response locally: `items = data.get("items", [])[:capped]` (line 73, `capped` defaults to 20, hard cap 50), but returns Canva's own, unmodified `continuation` token (line 77: `"continuation": data.get("continuation")`). Canva's `continuation` advances past its *entire* returned page, not past the `capped`-th item. If Canva's own page for this endpoint ever contains more than `capped` items (its default page size was never confirmed against the OpenAPI spec — this was flagged as a non-blocking "confirm at implementation time" open question in the tech design, §"Open questions", second bullet, but the implementation does not resolve it; the code is simply wrong regardless of what that page size turns out to be), the items between index `capped` and the end of Canva's page are silently dropped: a caller that follows the documented pagination contract (re-call with the returned `continuation`) will never see them. This directly breaks AC3's "if more exist, a continuation token the caller can pass back to get the next page" and AC11's identical contract for `canva_list_folder_items` — "get the next page" is not what the returned token does once local truncation has happened. `tests/test_tools.py::test_list_designs_returns_empty_list_when_canva_has_no_matches` does not exercise this path (the mocked Canva response has 0 items), so the gate green does not cover it.
+
+   `src/canva_mcp/tools/folders.py:57-72` has the identical pattern (`canva_list_folder_items`): truncate locally at line 67, pass through Canva's raw `continuation` at line 71.
+
+   This is a correctness bug per `references/REVIEW.md`'s "pagination miscalculated" must-fix category, not a style nit — it means a tenant with more designs/folder items than the (sub-Canva-page-size) `limit` they asked for will have some of them permanently unreachable through the documented pagination flow.
+
+   Fix: either (a) confirm against Canva's OpenAPI spec (`https://www.canva.dev/sources/connect/api/latest/api.yml`) whether `GET /designs` and `GET /folders/{id}/items` accept a page-size query param, and forward `capped` as that param so Canva's own page matches what is returned to the caller, or (b) if no such param exists, implement real client-side pagination that only ever advances the cursor by what was actually handed back to the caller (e.g. buffer the untruncated page server-side-free, by encoding an offset into a locally-minted continuation token) instead of passing Canva's raw cursor through unchanged.
+
+2. [suggestion] `src/canva_mcp/tools/designs.py:92-100` (`canva_get_design`) — `page_count` is computed as `len(page_items) if page_items else pages.get("total")` from `GET /designs/{id}/pages`. If that endpoint itself paginates for designs with many pages (unconfirmed — TC5, the manual case that would exercise this against a real design, was not run per the "needs a real vendor account" note), this would report only the first page's item count rather than the design's true total page count. Worth checking in the same real-account verification pass already planned for TC3/TC5/TC7-TC11; not blocking since it is unconfirmed and in the same "needs a real vendor account" bucket as the rest of the design's acknowledged gaps.
+
+### Verification performed
+
+- `uv sync --frozen && uv run pytest -v` re-run on `6d66df3`: 8 passed, 0 failed (matches the Self-test section's claim).
+- `grep -rnP '[\x{4e00}-\x{9fff}]' --exclude-dir=.git --exclude-dir=.venv .`: no output (matches the "no CJK" claim).
+- README `## MSPbots Connector` section diffed byte-for-byte against `~/.claude/skills/vendor-mcp-development/reference/readme-connector-section.md`: identical (only diff was the blank-line boundary from the extraction, not content).
+- Credential header name matches end-to-end: `X-Canva-Access-Token` in `middleware.py:19`, README's Authentication headers table, and the `[DEV]` stub's proposed `credential_fields`.
+- Did not re-run the container build/smoke or `gitleaks` (no new network/vendor risk from a review read, and the Self-test section's reported commands and results are consistent with the diff).
+
+### What passed review
+
+- Request-level credential isolation (`ContextVar`, `finally: reset()`, no module/global state) — matches SOP §3.3/§3.4, and `tests/test_middleware.py::test_contextvar_token_is_isolated_across_concurrent_requests` is a real interleaved-concurrency test, not a sequential one dressed up as concurrent.
+- Error envelope and status-code mapping (`errors.py`) is a fixed, finite vocabulary; Canva's raw 4xx bodies are never echoed back (`client.py:114-117`, verified by `test_get_design_maps_canva_404_to_structured_not_found`).
+- Retry/backoff respects `Retry-After`, is bounded by a real wall-clock deadline (`client.py:37,53-54,62-63`), and does not retry non-429 4xx (`client.py:78-80`) — matches AC13/AC14 and is unit-tested for both branches.
+- `/health` never calls Canva (`server.py:37-40`); the MCP sub-app's lifespan is explicitly wired into the outer Starlette app (`server.py:85-96`) with a comment explaining why that step is easy to silently skip — this exact class of bug (health green, `/mcp` broken) was caught live in the Self-test container smoke.
+- Scope is in line with the tech design's non-goals (no OAuth flow in this repo, no raw-binary upload, no destructive tools); `Decisions made by DEV01` reads as genuine trade-offs with alternatives stated, not post-hoc justification.
+- No duplicated/home-grown HTTP, retry, or MCP-protocol plumbing — `fastmcp`/`mcp[cli]`, `httpx`, `pydantic-settings` are exactly the SOP's named stack (reuse & cleanup checked, nothing to clean up in a from-scratch repo).
+
+### Fixes
+
+(to be added by the dev leg in the next round)
