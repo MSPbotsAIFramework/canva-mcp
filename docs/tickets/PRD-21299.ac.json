@@ -4,8 +4,10 @@
     "ac": "AC1",
     "type": "auto",
     "source": "design",
-    "text": "Given the service is running, When the gateway calls tools/list, Then exactly the 9 canva_* tools from Tech design §4 are returned, each description ≤500 chars with a ≤100-char first line.",
-    "tests": ["tests/test_tools.py::test_tools_list_matches_the_nine_tool_contract"]
+    "text": "Given the service is running, When the gateway calls tools/list, Then exactly the 9 canva_* tools from Tech design \u00a74 are returned, each description \u2264500 chars with a \u2264100-char first line.",
+    "tests": [
+      "tests/test_tools.py::test_tools_list_matches_the_nine_tool_contract"
+    ]
   },
   {
     "id": "TC2",
@@ -13,7 +15,9 @@
     "type": "auto",
     "source": "design",
     "text": "Given no X-Canva-Access-Token header is sent, When any Canva tool is called, Then the service returns HTTP 401 with a body naming the missing header, not HTTP 500.",
-    "tests": ["tests/test_middleware.py::test_missing_header_returns_401_listing_required_header"]
+    "tests": [
+      "tests/test_middleware.py::test_missing_header_returns_401_listing_required_header"
+    ]
   },
   {
     "id": "TC3",
@@ -36,7 +40,9 @@
     "type": "auto",
     "source": "design",
     "text": "Given Canva returns an empty designs array for a query, When canva_list_designs is called with that query, Then the tool returns an empty list, not an error and not a not_found code.",
-    "tests": ["tests/test_tools.py::test_list_designs_returns_empty_list_when_canva_has_no_matches"]
+    "tests": [
+      "tests/test_tools.py::test_list_designs_returns_empty_list_when_canva_has_no_matches"
+    ]
   },
   {
     "id": "TC5",
@@ -58,7 +64,9 @@
     "type": "auto",
     "source": "design",
     "text": "Given Canva returns 404 for a design id, When canva_get_design is called with that id, Then the tool returns a structured not_found error, not a raw passthrough of Canva's 4xx body.",
-    "tests": ["tests/test_tools.py::test_get_design_maps_canva_404_to_structured_not_found"]
+    "tests": [
+      "tests/test_tools.py::test_get_design_maps_canva_404_to_structured_not_found"
+    ]
   },
   {
     "id": "TC7",
@@ -80,7 +88,7 @@
     "ac": "AC8",
     "type": "manual",
     "source": "design",
-    "text": "Given a valid access token and an existing visible design id, When canva_export_design is called with format=pdf, Then within the internal poll budget it returns download URL(s), or an export_id with status in_progress if the budget runs out — it never hangs past the budget.",
+    "text": "Given a valid access token and an existing visible design id, When canva_export_design is called with format=pdf, Then within the internal poll budget it returns download URL(s), or an export_id with status in_progress if the budget runs out \u2014 it never hangs past the budget.",
     "steps": [
       "Call canva_export_design(design_id=<a single-page test design>, format=\"pdf\")",
       "Measure wall-clock time to response",
@@ -139,7 +147,9 @@
     "type": "auto",
     "source": "design",
     "text": "Given two concurrent requests carrying two different tokens, When each calls a Canva tool, Then each outbound call to Canva uses only its own request's token and neither request's context leaks into the other.",
-    "tests": ["tests/test_middleware.py::test_contextvar_token_is_isolated_across_concurrent_requests"]
+    "tests": [
+      "tests/test_middleware.py::test_contextvar_token_is_isolated_across_concurrent_requests"
+    ]
   },
   {
     "id": "TC13",
@@ -158,6 +168,33 @@
     "type": "auto",
     "source": "design",
     "text": "Given a mocked Canva transport that returns 401 (expired/revoked token), When any tool is called, Then the service returns its own 401/unauthorized immediately, without treating it as a transient/retryable error.",
-    "tests": ["tests/test_tools.py::test_canva_401_is_surfaced_as_unauthorized_without_retry"]
+    "tests": [
+      "tests/test_tools.py::test_canva_401_is_surfaced_as_unauthorized_without_retry"
+    ]
+  },
+  {
+    "id": "TC15",
+    "ac": "AC3",
+    "type": "auto",
+    "source": "dev",
+    "text": "Review round 1 regression: canva_list_designs forwards the clamped `limit` to Canva as a query param (so Canva's own page boundary, and therefore its `continuation` token, matches what is returned), and every item Canva sends within that bound survives to the caller.",
+    "tests": [
+      "tests/test_tools.py::test_list_designs_forwards_capped_limit_to_canva",
+      "tests/test_tools.py::test_list_designs_returns_every_item_canva_sent_for_the_forwarded_limit"
+    ],
+    "result": "pass",
+    "evidence": "uv run pytest -v on dev/PRD-21299 (post-fix): both tests passed; see Self-test section for the full run."
+  },
+  {
+    "id": "TC16",
+    "ac": "AC11",
+    "type": "auto",
+    "source": "dev",
+    "text": "Review round 1 regression: canva_list_folder_items forwards the clamped `limit` to Canva as a query param, same fix and same bug class as canva_list_designs (TC15).",
+    "tests": [
+      "tests/test_tools.py::test_list_folder_items_forwards_capped_limit_to_canva"
+    ],
+    "result": "pass",
+    "evidence": "uv run pytest -v on dev/PRD-21299 (post-fix): test passed; see Self-test section for the full run."
   }
 ]

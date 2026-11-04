@@ -65,11 +65,18 @@ def register(mcp, client_factory: ClientFactory) -> None:
             try:
                 data = await client.get(
                     "/designs",
-                    params={"query": query, "ownership": ownership, "continuation": continuation},
+                    # `limit` is forwarded to Canva (PRD-21299 review round 1) so Canva's own
+                    # page boundary matches `capped`; otherwise the `continuation` token Canva
+                    # returns advances past its full page, silently skipping the items between
+                    # `capped` and the end of that page. Confirmed against Canva's OpenAPI spec:
+                    # GET /v1/designs.limit accepts 1-100, well above our 50 hard cap.
+                    params={"query": query, "ownership": ownership, "continuation": continuation, "limit": capped},
                 )
             except CanvaAPIError as e:
                 return errors.envelope_for(e)
 
+        # Defensive: Canva is contractually bounded by `limit` above, but we still slice
+        # locally in case a future Canva response ever exceeds what was asked for.
         items = data.get("items", [])[:capped]
         return to_json(
             {
