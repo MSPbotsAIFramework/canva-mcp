@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+__pycache__
+*.pyc
+.pytest_cache
+tests
+docs
+# README.md stays: pyproject.toml's [project].readme points at it, and
+# hatchling fails the build if it is missing from the context.
