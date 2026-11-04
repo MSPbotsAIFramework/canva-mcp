@@ -37,4 +37,21 @@ Verdict: changes requested
 
 ### Fixes
 
-(to be added by the dev leg in the next round)
+Fixed in `dev/PRD-21299 @ 4e47345` (synced with `main @ e828ad9`, unchanged since the base — no new commits to merge).
+
+1. **Must-fix 1 (pagination/continuation mismatch)** — `src/canva_mcp/tools/designs.py` (`canva_list_designs`) and `src/canva_mcp/tools/folders.py` (`canva_list_folder_items`): both now forward the clamped `capped` value to Canva as the `limit` query param, in addition to the existing local slice (kept as a defensive no-op, commented as such).
+
+   Resolved the review's option (a) rather than (b): fetched Canva's published OpenAPI spec (`https://www.canva.dev/sources/connect/api/latest/api.yml`) and confirmed `GET /v1/designs` and `GET /v1/folders/{folderId}/items` both declare an optional `limit` query parameter, integer, `minimum: 1`, `maximum: 100` (defaults 25 and 50 respectively in Canva's own API, irrelevant once we always send ours). Our hard cap (50) is below Canva's maximum (100), so `capped` is always a valid value to forward. With `limit=capped` on the request, Canva's own page is bounded by the same number we return, so its `continuation` token — passed through unchanged, as before — now always advances past exactly the items the caller saw. No items between `capped` and the end of Canva's page can exist anymore, because Canva's page ends at `capped`.
+
+   New regression coverage, since the review noted the existing gate did not exercise this path: `tests/test_tools.py::test_list_designs_forwards_capped_limit_to_canva`, `tests/test_tools.py::test_list_designs_returns_every_item_canva_sent_for_the_forwarded_limit`, `tests/test_tools.py::test_list_folder_items_forwards_capped_limit_to_canva` (asserts the outgoing `limit` query param for a sub-cap value, the default, and a value above the hard cap; asserts every item in a Canva page sized exactly to the forwarded limit survives to the caller; asserts `continuation` passes through unchanged in all cases). Added to the `.ac.json` ledger as `TC15` (AC3) and `TC16` (AC11), `source: dev` per the pipeline's "dev-added test cases" rule — these are dev-added regression tests, not a change to the design-owned AC3/AC11 acceptance text itself.
+
+2. **Suggestion 2 (`canva_get_design` page_count)** — not changed. The reviewer flagged this as non-blocking and in the same "needs a real vendor account" bucket as the rest of the design's acknowledged gaps (TC5); it is not a must-fix and this round only addresses must-fix 1 per the review-rework rule (only listed must-fix items are in scope for a review-rework round).
+
+**Full gate re-run on `4e47345`** (same commands as Self-test, repeated per the review-rework rule):
+- `uv sync --frozen && uv run pytest -v`: **11 passed, 0 failed** (8 pre-existing + 3 new; the 3 new all exercise the fixed code path).
+- `grep -rnP '[\x{4e00}-\x{9fff}]' --exclude-dir=.git --exclude-dir=.venv .`: no output (still clean; this round touched no text).
+- README `## MSPbots Connector` section (lines 20-89) diffed against `~/.claude/skills/vendor-mcp-development/reference/readme-connector-section.md`: identical except the same pre-existing blank-line/`<div align="center">` extraction boundary noted in round 1 — untouched by this round's change.
+- Local smoke: `uv run python -m canva_mcp` on port 8099 — `GET /health` → 200; `POST /mcp tools/list` with no `X-Canva-Access-Token` → 401; with a placeholder token → 200 with all 9 tools listed, same names/schemas as round 1 (the `limit` field's description and default are unchanged — only the outgoing Canva request gained a `limit` param, nothing in the tool's public contract changed). Server stopped after the check.
+- `gitleaks`: not installed in this environment (same as round 1's note); no new network/vendor risk from this change (two added `dict` keys, no new secret handling).
+
+Sha for review: `4e47345` (pushed to `dev/PRD-21299`).
