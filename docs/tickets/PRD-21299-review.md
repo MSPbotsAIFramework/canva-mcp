@@ -1,5 +1,73 @@
 # PRD-21299 · Code review
 
+Status: frozen @ a4f9d63
+
+## Round 2 · 2026-11-04 · reviewed dev/PRD-21299 @ a4f9d63 (base main @ e828ad9)
+
+Verdict: approved
+
+### Round 1 must-fix reconciliation
+
+1. **Must-fix 1 (pagination/continuation mismatch)** — CONFIRMED RESOLVED.
+   `src/canva_mcp/tools/designs.py:66-77` (`canva_list_designs`) and
+   `src/canva_mcp/tools/folders.py:57-72` (`canva_list_folder_items`) now forward the
+   already-clamped `capped` value to Canva as the `limit` query param, in addition to
+   the (now-defensive, commented as such) local slice. Independently fetched Canva's
+   live OpenAPI spec (`https://www.canva.dev/sources/connect/api/latest/api.yml`,
+   downloaded fresh during this review, not taken on the dev's word) and confirmed:
+   `GET /v1/designs.limit` — `integer, minimum 1, maximum 100, default 25`;
+   `GET /v1/folders/{folderId}/items.limit` — `integer, minimum 1, maximum 100, default 50`.
+   The service's hard cap is 50, inside both endpoints' accepted range, so `capped` is
+   always a valid value to forward. With Canva's own page now bounded by the same
+   number returned to the caller, the unmodified `continuation` token it hands back
+   always advances past exactly the items the caller saw — the silent-drop window
+   between `capped` and the end of Canva's page (round 1's finding) no longer exists.
+   This restores AC3/AC11's "a continuation token that gets the next page" contract.
+2. **Suggestion 2 (`canva_get_design` page_count`)** — correctly left unchanged; it was
+   non-blocking in round 1 and out of scope for a must-fix-only rework round.
+
+### New diff this round (`6d66df3...a4f9d63`)
+
+- `src/canva_mcp/tools/designs.py`, `src/canva_mcp/tools/folders.py`: the `limit`
+  forwarding fix above, each with an inline comment explaining why (good — the next
+  reader doesn't have to re-derive the OpenAPI constraint).
+- `tests/test_tools.py`: three new regression tests —
+  `test_list_designs_forwards_capped_limit_to_canva` (asserts the outgoing `limit`
+  query param for a sub-cap value, the unclamped default, and a value above the hard
+  cap — all three clamp branches), `test_list_designs_returns_every_item_canva_sent_for_the_forwarded_limit`
+  (asserts every item in a Canva page sized to the forwarded limit survives, and
+  `continuation` passes through unchanged), `test_list_folder_items_forwards_capped_limit_to_canva`
+  (same coverage for the folder-items tool). These actually exercise the request the
+  mock receives (`request.url.params["limit"]`), not just the tool's return value —
+  the kind of test that would have caught round 1's bug directly.
+- `docs/tickets/PRD-21299.ac.json`: `TC15` (AC3) and `TC16` (AC11) added with
+  `"source": "dev"`, `"result": "pass"`, evidence pointing at the new tests — correctly
+  not touching the design-owned AC3/AC11 acceptance text itself.
+- `docs/tickets/PRD-21299-review.md`: round 1's own "Fixes" section (written by the
+  dev leg under the review-rework protocol) — read and reconciled above, not altered.
+
+### Verification performed (independent of what the Fixes section claims)
+
+- `uv sync --frozen && uv run pytest -v` re-run on `a4f9d63`: **11 passed, 0 failed**
+  (8 pre-existing + 3 new) — matches the claim.
+- Fetched Canva's OpenAPI spec live and parsed the `limit` parameter schema for both
+  endpoints (see above) — this is the load-bearing fact for the fix and was checked
+  against the vendor's actual spec, not re-derived from the dev's description of it.
+- `grep -rnP '[\x{4e00}-\x{9fff}]' --exclude-dir=.git --exclude-dir=.venv .`: no output.
+- README `## MSPbots Connector` section re-diffed against
+  `~/.claude/skills/vendor-mcp-development/reference/readme-connector-section.md`:
+  same pre-existing blank-line/`<div align="center">` extraction-boundary difference
+  noted in round 1, untouched by this round's change — not a new finding.
+- Did not re-run the container build/smoke or `gitleaks`: this round's diff is
+  confined to a query-param value and test code, no new network/vendor/credential
+  surface, and round 1's "Fixes" section already re-ran the local smoke (`/health`,
+  missing-token 401, `tools/list` contract) against the fixed code with an unchanged
+  tool contract.
+
+### Findings
+
+None (0 must-fix, 0 new suggestions).
+
 ## Round 1 · 2026-11-04 · reviewed dev/PRD-21299 @ 6d66df3 (base main @ e828ad9)
 
 Verdict: changes requested
